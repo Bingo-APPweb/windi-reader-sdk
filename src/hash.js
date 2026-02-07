@@ -26,3 +26,8 @@ export function sha256UrnFromFile(filePath) {
 export function sha256UrnFromBuffer(buf) {
   return `sha256:${sha256HexFromBuffer(buf)}`;
 }
+
+/** @param {string} text */
+export function sha256UrnFromUtf8(text) {
+  return `sha256:${sha256HexFromUtf8(text)}`;
+}

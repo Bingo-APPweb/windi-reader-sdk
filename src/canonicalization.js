@@ -30,24 +30,52 @@ export function canonIBAN(iban) {
 }
 
 /**
+ * Currency symbol/name to ISO 4217 mapping
+ */
+const CURRENCY_MAP = {
+  "€": "EUR", "EURO": "EUR", "EUR": "EUR",
+  "$": "USD", "DOLLAR": "USD", "USD": "USD",
+  "£": "GBP", "POUND": "GBP", "GBP": "GBP",
+  "¥": "JPY", "YEN": "JPY", "JPY": "JPY",
+  "CHF": "CHF", "FRANC": "CHF"
+};
+
+/**
  * ISO currency canonical.
  * @param {string} cur
  */
 export function canonCurrency(cur) {
-  return canonTextUpper(cur);
+  const upper = canonTextUpper(cur);
+  return CURRENCY_MAP[upper] || upper;
 }
 
 /**
- * Amount canonical: accepts "1.234,50" or "1234.5" → "1234.50"
+ * Amount canonical: accepts "€ 1.234,50" or "1,234.50" or "1234.5" → "1234.50"
  * WARNING: this is a pragmatic canonicalizer for Reader-side checks, not accounting grade.
  * @param {string|number} amount
  */
 export function canonAmount2(amount) {
-  const raw = canonText(String(amount ?? ""));
+  let raw = canonText(String(amount ?? ""));
   if (!raw) return "0.00";
 
-  // Convert "1.234,50" -> "1234.50"
-  const normalized = raw.replace(/\./g, "").replace(",", ".");
+  // Strip currency symbols and whitespace
+  raw = raw.replace(/[€$£¥\s]/g, "");
+  if (!raw) return "0.00";
+
+  // Detect format: if last separator is comma, it's German format (1.234,50)
+  // if last separator is dot, it's US format (1,234.50)
+  const lastComma = raw.lastIndexOf(",");
+  const lastDot = raw.lastIndexOf(".");
+
+  let normalized;
+  if (lastComma > lastDot) {
+    // German format: 1.234,50 → remove dots, replace comma with dot
+    normalized = raw.replace(/\./g, "").replace(",", ".");
+  } else {
+    // US format or no thousands separator: 1,234.50 → remove commas
+    normalized = raw.replace(/,/g, "");
+  }
+
   const num = Number.parseFloat(normalized);
   if (Number.isNaN(num)) return "0.00";
 
