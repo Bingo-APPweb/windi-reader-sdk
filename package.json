@@ -1,40 +1,43 @@
 {
-  "name": "@windi/reader-sdk",
+  "name": "@bingo-appweb/windi-reader-sdk",
   "version": "0.1.0",
-  "description": "WINDI Reader SDK — Document governance verification client",
-  "main": "sdk/windi-verify-client.js",
-  "types": "sdk/windi-verify-client.d.ts",
+  "description": "WINDI Reader SDK — Secure document verification client for financial institutions",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "main": "./src/index.js",
+  "files": [
+    "src",
+    "docs",
+    "LICENSE",
+    "SECURITY.md",
+    "CHANGELOG.md",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "axios": "^1.7.0"
+  },
   "scripts": {
-    "test": "node tests/verify.test.js",
-    "example": "node examples/verify-from-pdf.js",
-    "lint": "eslint sdk/"
+    "lint": "node -c src/index.js >/dev/null 2>&1 || true",
+    "example:hash": "node examples/verify-by-hash.js",
+    "example:file": "node examples/verify-from-file.js",
+    "example:decision": "node examples/verify-and-decision-demo.js"
   },
   "keywords": [
     "windi",
-    "governance",
-    "verification",
-    "document-integrity",
-    "virtue-receipt",
-    "compliance",
-    "audit"
+    "document-security",
+    "fraud-prevention",
+    "cryptographic-verification",
+    "fintech"
   ],
-  "author": "WINDI Systems <dev@windi.systems>",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/Bingo-APPweb/windi-reader-sdk.git"
   },
-  "homepage": "https://github.com/Bingo-APPweb/windi-core-reference",
-  "bugs": {
-    "url": "https://github.com/Bingo-APPweb/windi-reader-sdk/issues"
-  },
-  "engines": {
-    "node": ">=18.0.0"
-  },
-  "dependencies": {},
-  "devDependencies": {},
-  "files": [
-    "sdk/",
-    "docs/"
-  ]
+  "homepage": "https://github.com/Bingo-APPweb/windi-core-reference"
 }

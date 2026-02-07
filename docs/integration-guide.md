@@ -1,303 +1,219 @@
-# WINDI Reader SDK — Integration Guide
-
-This guide explains how to integrate the WINDI Reader SDK into your application to verify WINDI-governed documents.
+# WINDI Reader SDK — Integration Guide (Bank/IT)
 
 ## Overview
 
-The WINDI Reader SDK provides:
+The WINDI Reader SDK provides secure document verification for financial institutions. It enables banks and enterprise systems to verify document integrity without processing sensitive content.
 
-- **Document Verification** — Verify document integrity and governance status
-- **Virtue Receipt Parsing** — Extract and validate governance proofs
-- **Chain Integrity Checks** — Verify Merkle chain links
-- **Offline Mode** — Verify documents without network access
+## Minimal Data Flow
+
+```
+┌─────────────┐     ┌──────────────┐     ┌─────────────────┐
+│   Customer  │────▶│  Bank System │────▶│  WINDI Verify   │
+│  (Document) │     │  (SHA-256)   │     │      API        │
+└─────────────┘     └──────────────┘     └─────────────────┘
+                           │                      │
+                           ▼                      ▼
+                    ┌──────────────┐     ┌─────────────────┐
+                    │ Policy Engine│◀────│ Verify Response │
+                    │ (ALLOW/HOLD) │     │ (trust + flags) │
+                    └──────────────┘     └─────────────────┘
+```
+
+1. Customer submits a document (PDF or file)
+2. Bank system computes `sha256` locally using SDK
+3. Bank calls WINDI `/verify` with only:
+   - `document_id` (WINDI identifier)
+   - `document_hash` (sha256)
+   - `issuer_key_id`
+   - optional `manifest_id`
+4. Bank receives `verify_result` (trust_level + checks + risk_flags)
+5. Bank applies internal policy (ALLOW/HOLD/BLOCK)
+
+## Privacy Guarantee
+
+The Reader SDK does **not** extract or send invoice text, amounts, or personal data. Only cryptographic hashes and identifiers are transmitted.
 
 ## Installation
 
 ```bash
-npm install @windi/reader-sdk
-```
-
-Or include directly:
-
-```javascript
-const { WindiVerifyClient } = require('./sdk/windi-verify-client');
+npm install @bingo-appweb/windi-reader-sdk
 ```
 
 ## Quick Start
 
 ```javascript
-const { WindiVerifyClient } = require('@windi/reader-sdk');
+import { WindiVerifyClient } from "@bingo-appweb/windi-reader-sdk";
 
-// Create client
-const client = new WindiVerifyClient();
+const client = new WindiVerifyClient({
+  baseUrl: "https://verify.windi.eu/api",
+  apiKey: process.env.WINDI_API_KEY
+});
 
-// Verify a document
-const result = await client.verifyDocument('document.pdf');
+// Verify a local file
+const result = await client.verifyFromFile({
+  filePath: "./invoice.pdf",
+  documentId: "windi:doc:inv-2026-001",
+  issuerKeyId: "windi:key:bank-de"
+});
 
-if (result.verified) {
-  console.log('✓ Document is WINDI verified');
-  console.log('Governance Level:', result.governanceLevel);
-  console.log('ISP Profile:', result.ispProfile);
-} else {
-  console.log('✗ Verification failed:', result.errors);
+if (result.verdict === "VALID") {
+  console.log("Document verified at level:", result.trust_level);
 }
 ```
 
-## API Reference
+## Verification Methods
 
-### WindiVerifyClient
-
-The main client for document verification.
-
-#### Constructor Options
+### 1. Verify from File (Recommended)
 
 ```javascript
-const client = new WindiVerifyClient({
-  apiEndpoint: null,        // WINDI API endpoint (optional)
-  offlineMode: true,        // Enable offline verification
-  strictMode: false         // Require all checks to pass
+const result = await client.verifyFromFile({
+  filePath: "./invoice.pdf",
+  documentId: "windi:doc:inv-001",
+  issuerKeyId: "windi:key:issuer",
+  proofLevel: "L2"  // L1, L2, or L3
 });
 ```
 
-#### Methods
-
-##### `verifyDocument(filePath)`
-
-Verify a document from file path.
+### 2. Verify from Bytes (In-memory)
 
 ```javascript
-const result = await client.verifyDocument('./governed-doc.pdf');
+const buffer = await fs.readFile("./invoice.pdf");
+const result = await client.verifyFromBytes({
+  bytes: buffer,
+  documentId: "windi:doc:inv-001",
+  issuerKeyId: "windi:key:issuer"
+});
 ```
 
-**Returns:** `VerificationResult`
-
-##### `verifyBuffer(buffer, virtueReceipt)`
-
-Verify a document from buffer with known Virtue Receipt.
+### 3. Verify with Pre-computed Hash
 
 ```javascript
-const buffer = fs.readFileSync('./document.pdf');
-const receipt = { /* Virtue Receipt */ };
-const result = client.verifyBuffer(buffer, receipt);
+const result = await client.verify({
+  document_id: "windi:doc:inv-001",
+  document_hash: "sha256:abc123...",
+  issuer_key_id: "windi:key:issuer",
+  proof_level: "L2"
+});
 ```
 
-##### `verifyReceipt(virtueReceipt)`
+## Trust Levels
 
-Validate a Virtue Receipt structure and chain integrity.
+| Level | Description | Use Case |
+|-------|-------------|----------|
+| `L1` | Offline/cached verification | Low-value, internal documents |
+| `L2` | Standard online verification | Normal transactions |
+| `L3` | Enhanced chain verification | High-value, regulated transactions |
 
-```javascript
-const validation = client.verifyReceipt(virtueReceipt);
-console.log(validation.valid);
-console.log(validation.chainIntact);
-```
-
-##### `computeHash(filePath)`
-
-Compute SHA-256 hash of a document.
-
-```javascript
-const hash = await client.computeHash('./document.pdf');
-console.log('Document hash:', hash);
-```
-
-### VerificationResult
-
-Result object returned by verification methods.
+## Response Structure
 
 ```typescript
 {
-  verified: boolean;          // True if document is verified
-  status: VerificationStatus; // Status code
-  documentHash: string;       // Computed document hash
-  virtueReceipt: VirtueReceipt | null;
-  governanceLevel: 'HIGH' | 'MEDIUM' | 'LOW' | null;
-  ispProfile: string | null;  // Institutional Style Profile ID
-  chainIntact: boolean;       // True if chain verified
-  errors: string[];           // Verification errors
-  warnings: string[];         // Verification warnings
-  verifiedAt: number;         // Timestamp (ms)
+  verdict: "VALID" | "SUSPECT" | "INVALID",
+  integrity: "INTACT" | "MODIFIED" | "UNKNOWN",
+  trust_level: "L1" | "L2" | "L3",
+  issuer_status: "TRUSTED" | "UNKNOWN" | "REVOKED",
+  checks: { /* detailed check results */ },
+  risk_flags: ["IBAN_MISMATCH", "AMOUNT_DEVIATION", ...],
+  request_id: "req-abc123"
 }
 ```
 
-### VerificationStatus
+## Policy Integration
 
 ```javascript
-const { VerificationStatus } = require('@windi/reader-sdk');
+function applyPolicy(paymentAmount, verifyResult) {
+  // Block tampered documents
+  if (verifyResult.verdict === "INVALID") {
+    return { action: "BLOCK", reason: "TAMPERED" };
+  }
 
-VerificationStatus.VERIFIED      // Document verified successfully
-VerificationStatus.INVALID       // Verification failed
-VerificationStatus.PENDING       // Verification in progress
-VerificationStatus.ERROR         // System error occurred
-VerificationStatus.NO_GOVERNANCE // No WINDI metadata found
-```
+  // Hold high-value without L3
+  if (paymentAmount >= 50000 && verifyResult.trust_level !== "L3") {
+    return { action: "HOLD", reason: "HIGH_VALUE_REQUIRES_L3" };
+  }
 
-### GovernanceLevel
+  // Block IBAN mismatches
+  if (verifyResult.risk_flags?.includes("IBAN_MISMATCH")) {
+    return { action: "BLOCK", reason: "IBAN_MISMATCH" };
+  }
 
-```javascript
-const { GovernanceLevel } = require('@windi/reader-sdk');
-
-GovernanceLevel.HIGH    // High-risk governance (banking, legal)
-GovernanceLevel.MEDIUM  // Medium-risk governance (corporate)
-GovernanceLevel.LOW     // Low-risk governance (general)
+  return { action: "ALLOW", reason: "OK" };
+}
 ```
 
 ## Hash Utilities
 
-The SDK includes hash utility functions:
+The SDK includes cryptographic utilities:
 
 ```javascript
-const {
-  sha256,
-  sha256File,
-  hashJSON,
-  canonicalizeJSON,
-  verifyChainLink,
-  GENESIS_HASH
-} = require('@windi/reader-sdk');
-
-// Hash a string or buffer
-const hash = sha256('Hello, World!');
+import { Hash } from "@bingo-appweb/windi-reader-sdk";
 
 // Hash a file
-const fileHash = await sha256File('./document.pdf');
+const hash = Hash.sha256HexFromFile("./invoice.pdf");
+const urn = Hash.sha256UrnFromFile("./invoice.pdf");
+// -> "sha256:abc123..."
 
-// Hash JSON deterministically
-const jsonHash = hashJSON({ foo: 'bar', baz: 123 });
+// Hash a buffer
+const bufHash = Hash.sha256HexFromBuffer(buffer);
 
-// Verify a chain link
-const valid = verifyChainLink(prevHash, payload, expectedHash);
+// Hash text
+const textHash = Hash.sha256HexFromUtf8("Hello, World!");
 ```
 
-## Virtue Receipt Format
+## Canonicalization Utilities
 
-A Virtue Receipt contains:
-
-```json
-{
-  "document_id": "DOC-2026-001",
-  "hash": "a1b2c3d4...",
-  "prev_hash": "0000000...",
-  "chain_hash": "e5f6g7h8...",
-  "timestamp": "2026-02-07T12:00:00Z",
-  "governance_level": "HIGH",
-  "isp_profile": "deutsche-bank",
-  "sge_scores": {
-    "R0": 0.1,
-    "R1": 0.2,
-    "R2": 0.3,
-    "R3": 0.4,
-    "R4": 0.5,
-    "R5": 0.6
-  },
-  "actor": "user@example.com"
-}
-```
-
-## Integration Examples
-
-### Bank Document Verification
+For deterministic field comparison:
 
 ```javascript
-const { WindiVerifyClient, GovernanceLevel } = require('@windi/reader-sdk');
+import { Canon } from "@bingo-appweb/windi-reader-sdk";
 
-async function verifyBankDocument(filePath) {
-  const client = new WindiVerifyClient({ strictMode: true });
-  const result = await client.verifyDocument(filePath);
+Canon.canonIBAN("DE89 3704 0044 0532 0130 00");
+// -> "DE89370400440532013000"
 
-  if (!result.verified) {
-    throw new Error('Document verification failed');
-  }
+Canon.canonAmount2("1.234,50");
+// -> "1234.50"
 
-  // Enforce HIGH governance for banking
-  if (result.governanceLevel !== GovernanceLevel.HIGH) {
-    throw new Error('Document requires HIGH governance level');
-  }
+Canon.canonCurrency("eur");
+// -> "EUR"
 
-  return {
-    verified: true,
-    hash: result.documentHash,
-    governanceLevel: result.governanceLevel,
-    timestamp: result.virtueReceipt.timestamp
-  };
-}
+Canon.shelfPaytoIban("DE89370400440532013000");
+// -> "PAYTO|IBAN|DE89370400440532013000"
 ```
 
-### Audit Trail Integration
+## Error Handling
 
 ```javascript
-const { WindiVerifyClient } = require('@windi/reader-sdk');
+import { WindiHttpError, WindiConfigError } from "@bingo-appweb/windi-reader-sdk";
 
-async function auditDocument(filePath, auditLog) {
-  const client = new WindiVerifyClient();
-  const result = await client.verifyDocument(filePath);
-
-  // Log to audit trail
-  auditLog.append({
-    action: 'DOCUMENT_VERIFICATION',
-    documentHash: result.documentHash,
-    verified: result.verified,
-    governanceLevel: result.governanceLevel,
-    chainIntact: result.chainIntact,
-    timestamp: new Date().toISOString()
-  });
-
-  return result;
+try {
+  const result = await client.verify(request);
+} catch (err) {
+  if (err instanceof WindiHttpError) {
+    console.error(`HTTP ${err.status}:`, err.data);
+    console.error("Request ID:", err.requestId);
+  } else if (err instanceof WindiConfigError) {
+    console.error("Configuration error:", err.message);
+  }
 }
 ```
 
-### React Integration
+## Environment Variables
 
-```jsx
-import { useState } from 'react';
-import { WindiVerifyClient } from '@windi/reader-sdk';
-
-function DocumentVerifier() {
-  const [result, setResult] = useState(null);
-
-  const handleVerify = async (file) => {
-    const client = new WindiVerifyClient();
-    const buffer = await file.arrayBuffer();
-    const result = client.verifyBuffer(Buffer.from(buffer), virtueReceipt);
-    setResult(result);
-  };
-
-  return (
-    <div>
-      <input type="file" onChange={e => handleVerify(e.target.files[0])} />
-      {result?.verified && <span>✓ WINDI Verified</span>}
-    </div>
-  );
-}
-```
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `WINDI_BASE_URL` | API endpoint | `https://verify.windi.eu/api` |
+| `WINDI_API_KEY` | Authentication key | Required |
 
 ## Security Considerations
 
-1. **Hash Verification** — Always verify document hash matches Virtue Receipt
-2. **Chain Integrity** — Verify chain links for tamper detection
-3. **Governance Level** — Enforce appropriate level for use case
-4. **Offline Mode** — SDK works without network for privacy
-5. **No Sensitive Data** — SDK never processes document content
-
-## Troubleshooting
-
-### "No WINDI governance metadata found"
-
-The document does not contain WINDI governance data. Ensure the document was processed through a WINDI-enabled editor.
-
-### "Document hash does not match Virtue Receipt"
-
-The document content has been modified after governance was applied. The document should be considered invalid.
-
-### "Chain integrity verification failed"
-
-The Merkle chain link verification failed. This may indicate tampering or an incomplete Virtue Receipt.
+1. **No Content Transmission** — Only hashes and IDs are sent
+2. **Local Hashing** — Document content never leaves your system
+3. **TLS Required** — All API calls use HTTPS
+4. **Key Rotation** — API keys should be rotated regularly
+5. **Audit Trail** — Log all verification requests/responses
 
 ## Support
 
 - Documentation: https://github.com/Bingo-APPweb/windi-core-reference
 - Issues: https://github.com/Bingo-APPweb/windi-reader-sdk/issues
 - Security: security@windi.systems
-
-## License
-
-Apache 2.0 — See [LICENSE](../LICENSE)
